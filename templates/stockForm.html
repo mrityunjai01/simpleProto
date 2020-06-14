@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+    <form action="/stockForm" method="post">
+        <label for="symbol">Stock Symbol</label>
+        <input type="text"  name="symbol" id="symbol">
+        <br>
+        <label for="quantity">No. of Stocks</label>
+        <input type="number" name="quantity" id="quantity" min="0">
+        <br>
+        <label for="origValue">Original stock acquisition price</label>
+        <input type="number" step="any" min="0" name="origValue" id="origValue">
+        <br>
+        <input type="submit"> 
+    </form>
+</body>
+</html>
