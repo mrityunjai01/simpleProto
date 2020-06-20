@@ -7,6 +7,7 @@ import (
 	_ "fmt"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/schema"
+	"github.com/gorilla/securecookie"
 	_ "github.com/lib/pq"
 	"html/template"
 	"io/ioutil"
@@ -60,6 +61,11 @@ type TimeSeriesMonthly struct {
 	} `json:"Meta Data"`
 	PriceArray []Info `json:"Weekly Adjusted Time Series"`
 }
+type Login struct {
+	UserName string
+	Password string
+}
+
 
 type User struct {
 	UserName string
@@ -122,6 +128,7 @@ type AllData struct {
 var psqlInfo string
 var db *sql.DB
 var cache = make(map[string]StoredPrice)
+var cookieHandler = securecookie.New(securecookie.GenerateRandomKey(64),securecookie.GenerateRandomKey(32))
 
 func init() {
 	psqlInfo = fmt.Sprintf("host=%s port=%d user=%s "+
@@ -156,35 +163,91 @@ func main() {
 	router.HandleFunc("/stockForm", stockRegistration).Methods("GET")
 	router.HandleFunc("/stockForm", stockProcess).Methods("POST")
 	router.HandleFunc("/stockProfit", stockProfit).Methods("GET")
-	router.HandleFunc("/timeMonthly", monthData).Methods("GET")
+	router.HandleFunc("/login",loginForm).Methods("GET")
+	router.HandleFunc("/login",loginProcess).Methods("POST")
+	router.HandleFunc("/logout",logout).Methods("GET")
+	router.HandleFunc("/test",tester).Methods("GET")
+
 
 	http.ListenAndServe(CONN_HOST+":"+CONN_PORT, router)
 }
 
-func monthData(writer http.ResponseWriter, request *http.Request) {
-	vars := request.URL.Query()
-	symbol, symbolOk := vars["stock"]
-	apiUrl := ""
-	if symbolOk {
-		apiUrl = MONTHLY_DATA_URL_1 + symbol[0] + MONTHLY_DATA_URL_2 + API_KEY
-	} else {
-		log.Printf("error reading arguments")
-		return
+func tester(writer http.ResponseWriter, request *http.Request) {
+	log.Printf("reading cookie")
+	var userName string
+	cookie, err := request.Cookie("session")
+	if err==nil {
+		cookieValue := make(map[string]string)
+		err = cookieHandler.Decode("session",cookie.Value,&cookieValue)
+		if err==nil{
+			userName=cookieValue["userName"]
+		}else {
+			log.Printf("no cookie",err)
+		}
+
+	}else {
+		log.Printf("no cookie",err)
 	}
-	response, err := http.Get(apiUrl)
-	if err != nil {
-		log.Printf("error getting monthly request", err)
-		return
-	}
-	responseData, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	var resp TimeSeriesMonthly
-	json.Unmarshal([]byte(responseData), &resp)
-	json.NewEncoder(writer).Encode(resp)
+	fmt.Fprintf(writer,userName)
 
 }
+
+func logout(writer http.ResponseWriter, request *http.Request) {
+	clearSession(writer)
+	http.Redirect(writer,request,"/",302)
+}
+
+func loginProcess(writer http.ResponseWriter, request *http.Request) {
+	request.ParseForm()
+	login := new(Login)
+	decoder := schema.NewDecoder()
+	log.Printf("inside process")
+	decodeErr := decoder.Decode(login, request.PostForm)
+	if decodeErr != nil {
+		log.Printf("error parsing form")
+		return
+	}
+
+	sqlStatement := `SELECT id,username,password FROM users WHERE username=$1 AND password = $2`
+	row := db.QueryRow(sqlStatement, login.UserName,login.Password)
+	var name, password string
+	var id int
+	err := row.Scan(&id,&name, &password)
+	if err== sql.ErrNoRows {
+		log.Printf("no user like this")
+		return
+	} else if err!=nil{
+		panic(err)
+	}
+	value:=map[string]string{
+		"userName" :name,
+		"Id" : string(id),
+	}
+	encoded ,err :=cookieHandler.Encode("session",value)
+	if err==nil {
+		cookie := &http.Cookie{
+			Name:  "session",
+			Value: encoded,
+			Path:  "/",
+		}
+		http.SetCookie(writer,cookie)
+	}
+	fmt.Fprintf(writer,name,password,id)
+}
+
+func loginForm(writer http.ResponseWriter, request *http.Request) {
+	parsedTemplate,err:=template.ParseFiles("templates/login.html")
+	if err!=nil {
+		log.Printf("error parsing form",err)
+	}
+	err=parsedTemplate.Execute(writer,nil)
+	if err!=nil {
+		log.Printf("error executing form",err)
+	}
+
+}
+
+
 
 func stockProfit(writer http.ResponseWriter, request *http.Request) {
 	sqlStatement := `SELECT stock,quantity,orig_value FROM stocks WHERE users_id=1`
@@ -268,7 +331,7 @@ func stockCalculator(writer http.ResponseWriter, request *http.Request) {
 
 func profitCalculator(writer http.ResponseWriter, request *http.Request) {
 
-	sqlStatement := `SELECT curr,quantity,orig_value FROM transaction_store WHERE users_id=1`
+	sqlStatement := `SELECT curr,quantity,orig_value FROM transaction_store WHERE users_id=1;`
 	rows, err := db.Query(sqlStatement)
 	if err != nil {
 		panic(err)
@@ -531,4 +594,14 @@ func StockRate(stockSymbol string) float64 {
 	//log.Printf(fmt.Sprintf("%F",rate))
 
 	return rate
+}
+
+func clearSession(w http.ResponseWriter)  {
+	cookie := &http.Cookie{
+		Name: "session",
+		Value: "",
+		Path: "/",
+		MaxAge: -1,
+	}
+	http.SetCookie(w,cookie)
 }
