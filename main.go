@@ -53,8 +53,8 @@ type Info struct {
 	Dividend      string `json:"7. dividend amount"`
 }
 type Msg struct {
-	id  int
-	msg string
+	Id  int
+	Msg string
 }
 type TimeSeriesMonthly struct {
 	MetaData struct {
@@ -209,15 +209,15 @@ func logout(writer http.ResponseWriter, request *http.Request) {
 func already_logged_in(writer http.ResponseWriter, request *http.Request) {
 	parsedTemplate, err := template.ParseFiles("templates/msg.html")
 	if err != nil {
-		fmt.Printf("can't parse file templates/msg.html")
+		fmt.Printf("can't parse file templates/msg.html", err)
 	}
-	message := Msg{
-		id:  1,
-		msg: "You are already logged in, click logout button to log in again",
+	message_to_display := Msg{
+		Id:  1,
+		Msg: "You are already logged in, click logout button to log in again",
 	}
-	err = parsedTemplate.Execute(writer, message)
+	err = parsedTemplate.Execute(writer, message_to_display)
 	if err != nil {
-		log.Printf("Cant write into already_logged_in ")
+		log.Printf("Cant write into already_logged_in", err)
 	}
 }
 func loginProcess(writer http.ResponseWriter, request *http.Request) {
@@ -487,28 +487,28 @@ func currencyRegisterForm(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
+type Registered_or_not struct {
+	Username   string
+	Registered bool
+}
+
 func justRegistered(writer http.ResponseWriter, request *http.Request) {
 	parsedTemplate, err := template.ParseFiles("templates/justRegistered.html")
 	if err != nil {
 		log.Printf("error parsing justregistered", err)
 	}
-	username := ""
-
+	var ThisRegistration = Registered_or_not{"", false}
 	if cookie, err := request.Cookie("registry"); err == nil {
 		value := make(map[string]string)
 		if err = cookieHandler.Decode("registry", cookie.Value, &value); err == nil {
-			username = value["userName"]
+			ThisRegistration.Username = value["userName"]
+			ThisRegistration.Registered = true
 		} else {
 			fmt.Printf("there's a cookie registry but cant decode its value")
 		}
-	} else {
-		http.Redirect(writer, request, "/home", 302)
-		return
 	}
-	loginVars := LoginDisplay{
-		UserName: username,
-	}
-	err = parsedTemplate.Execute(writer, loginVars)
+
+	err = parsedTemplate.Execute(writer, ThisRegistration)
 	if err != nil {
 		log.Printf("error executing justRegistered", err)
 	}
@@ -526,13 +526,23 @@ func userRegisteration(writer http.ResponseWriter, request *http.Request) {
     INSERT INTO users (username,password,email)
 	VALUES ($1,$2,$3)`
 	_, err := db.Exec(sqlStatement, user.UserName, user.Password, user.Email)
-	redirectUrl := "/home"
+	redirectUrl := "/justRegistered"
 	if err != nil {
 		log.Printf("error in database", err)
-	} else {
-		redirectUrl = "/justRegistered"
-
 	}
+	value := map[string]string{
+		"userName": user.UserName,
+	}
+	encoded, err := cookieHandler.Encode("registry", value)
+	if err == nil {
+		cookie := &http.Cookie{
+			Name:  "registry",
+			Value: encoded,
+			Path:  "/",
+		}
+		http.SetCookie(writer, cookie)
+	}
+
 	http.Redirect(writer, request, redirectUrl, 302)
 }
 
